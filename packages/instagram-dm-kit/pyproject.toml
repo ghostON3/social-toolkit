@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "instagram-dm-kit"
+version = "0.1.0"
+description = "Read, send and harvest Instagram Direct messages — turn the reels/posts/links you DM into a structured knowledge corpus."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "ghostON3" }]
+keywords = ["instagram", "instagrapi", "dm", "direct-message", "scraper", "knowledge-base", "rag", "automation"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Communications :: Chat",
+  "Topic :: Internet",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# instagrapi is only needed for the LIVE messaging half (IgDirect lazy-imports it);
+# the pure stages (normalize/harvest/corpus/view) import with none of these.
+live = ["instagrapi>=2.0.0"]
+understand = ["faster-whisper>=1.2"]  # `idk understand` — also needs `ffmpeg` on PATH (system dep)
+browser = ["browser-cookie3>=0.19"]   # `idk connect` — reuse a browser login
+dev = ["pytest>=7", "instagrapi>=2.0.0", "faster-whisper>=1.2", "browser-cookie3>=0.19"]
+
+[project.urls]
+Homepage = "https://github.com/ghostON3/instagram-dm-kit"
+Issues = "https://github.com/ghostON3/instagram-dm-kit/issues"
+
+[project.scripts]
+idk = "instagram_dm_kit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/instagram_dm_kit"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

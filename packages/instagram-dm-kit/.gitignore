@@ -1,0 +1,25 @@
+# sessions & secrets — NEVER commit
+*session*.json
+.env
+.env.*
+*.secrets
+
+# downloaded media / harvested data
+inbox/
+*.jsonl
+!tests/**/*.jsonl
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# personal DM exports — never commit
+out/
