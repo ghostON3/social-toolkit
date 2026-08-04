@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "social-poster"
+version = "0.2.0"
+description = "Multi-platform social media poster — one Facade over Instagram, Bluesky, Mastodon, Discord, Reddit, Telegram, YouTube, Twitter/X, Threads, TikTok, Pinterest, Facebook, Tinder"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+  "instagrapi",
+  "pillow",
+  "atproto",
+  "Mastodon.py",
+  "praw",
+  "telethon",
+  "twikit",
+  "google-api-python-client",
+  "google-auth-oauthlib",
+  "google-auth-httplib2",
+  "requests",
+]
+
+[project.optional-dependencies]
+server = ["fastapi", "uvicorn[standard]"]
+dev = ["pytest", "httpx"]
+
+[project.scripts]
+sp-login = "social_poster.cli:login_cli"
+sp-post = "social_poster.cli:post_cli"
+sp-delete = "social_poster.cli:delete_cli"
+sp-serve = "social_poster._serve_entry:main"
+sp-dm = "social_poster.ig_dm_cli:main"
+sp-publish = "social_poster.scheduler:publish_cli"
+
+[tool.setuptools.packages.find]
+include = ["social_poster*"]

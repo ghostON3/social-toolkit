@@ -1,0 +1,20 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [instagram-dm-kit, social-poster]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: test ${{ matrix.package }}
+        working-directory: packages/${{ matrix.package }}
+        run: |
+          uv sync --all-extras
+          uv run pytest -q

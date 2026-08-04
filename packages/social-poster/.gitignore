@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+# session/credential material — never commit
+sessions/
+*session*.json
+*.session
+ig.json
+ig.json.bak
+
+dist/
+build/
+*.egg-info/
+
+# downloaded IG media
+inbox/
