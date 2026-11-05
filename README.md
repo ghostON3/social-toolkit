@@ -27,10 +27,31 @@ idk login
 idk threads
 idk corpus --thread <id> --out corpus.jsonl
 
-# publish one campaign to many platforms (dry-run is the default)
+# publish one campaign directory (01.png … + caption.txt) to many platforms
 pip install -e packages/social-poster
-sp-post --caption "hello world" --platforms bsky,mastodon --dry-run
+sp-post --to bsky,mast --dry-run ./my-campaign      # shorts: bsky dc fb ig mast pin rd tg th tt x yt
 ```
+
+Reuse a browser login instead of typing a password (Firefox on macOS shown):
+
+```bash
+pip install -e 'packages/instagram-dm-kit[browser]'
+IDK_SESSION=~/.config/social-poster/ig.json idk connect --browser firefox \
+  --cookie-file "$HOME/Library/Application Support/Firefox/Profiles/<profile>/cookies.sqlite"
+```
+
+## Agents, schedules and CircleHash News
+
+- `sp-mcp` (extra `mcp`) is a stdio MCP server over the facade: `platforms`, `sessions`,
+  `whoami`, `post`, `schedule`, `list_schedule`, `set_status`, `publish`, `news_sync`.
+  Everything is dry-run unless the call asks for live **and** the server runs with
+  `SOCIAL_POSTER_MCP_ALLOW_LIVE=1`.
+- `sp-publish --window 10` drains approved entries due in the window; run it from a
+  launchd agent or cron. Entries start `pending`; approving is the human gate.
+- `python -m connectors.circlehash_news_connector --client <id> --platforms ig`
+  plans one post per unseen CircleHash news post (public `GET /api/public/news/v1`,
+  or a saved JSON file) with the cover converted to JPEG.
+- `sp-serve` needs the `server` extra: `uv run --all-extras sp-serve`.
 
 ## Design
 

@@ -79,6 +79,43 @@ class PublishResult:
     error: str | None = None
 
 
+
+def _fetch_bytes(url: str, timeout: int = 30) -> bytes:
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": "social-poster/0.2"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return resp.read()
+
+
+def _materialize_media(sources: list[str], dest_dir: Path) -> list[Path]:
+    """Turn ``media_urls`` into local JPEG files the adapters can upload.
+
+    http(s) URLs are downloaded; local files are used as they are when they are
+    JPEGs and converted otherwise (Instagram rejects PNG uploads).
+    """
+    import io
+
+    from PIL import Image
+
+    out: list[Path] = []
+    for i, src in enumerate(sources):
+        if src.startswith(("http://", "https://")):
+            data = _fetch_bytes(src)
+        else:
+            local = Path(src).expanduser()
+            if local.suffix.lower() in (".jpg", ".jpeg"):
+                out.append(local)
+                continue
+            data = local.read_bytes()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        target = dest_dir / f"{i + 1:02d}.jpg"
+        with Image.open(io.BytesIO(data)) as im:
+            im.convert("RGB").save(target, "JPEG", quality=90)
+        out.append(target)
+    return out
+
+
 def publish_due(window_minutes: int = 10, dry_run: bool = False) -> list[PublishResult]:
     """Publish all approved posts scheduled within the next `window_minutes`.
 
@@ -97,22 +134,30 @@ def publish_due(window_minutes: int = 10, dry_run: bool = False) -> list[Publish
             if not (-2 <= delta <= window_minutes):
                 continue
 
-            client.set_env_for_platform(entry.platform)
-            content = (
-                CampaignBuilder()
-                .named(f"{client.id}-{entry.id}")
-                .with_caption(f"{entry.hook}\n\n{entry.body}\n\n{entry.cta}")
-                .with_slides(entry.media_urls)
-                .build()
-            )
-
             if dry_run:
                 print(f"[dry] would post {entry.id} for {client.id} on {entry.platform}")
                 results.append(PublishResult(entry.id, client.id, entry.platform, True))
                 continue
 
+            client.set_env_for_platform(entry.platform)
+            try:
+                slides = _materialize_media(entry.media_urls, client.dir / "media" / entry.id)
+            except Exception as e:  # unreachable URL, unreadable file, not an image
+                entry.status = "failed"
+                entry.error = f"media: {type(e).__name__}: {e}"
+                entry.save(client.dir)
+                results.append(PublishResult(entry.id, client.id, entry.platform, False, error=entry.error))
+                continue
+            content = (
+                CampaignBuilder()
+                .named(f"{client.id}-{entry.id}")
+                .with_caption(f"{entry.hook}\n\n{entry.body}\n\n{entry.cta}")
+                .with_slides(slides)
+                .build()
+            )
+
             res = poster.post(content, to=[entry.platform])
-            r = res[0] if res else None
+            r = res.get(entry.platform) if res else None  # facade.post returns {platform: PostResult}
             if r and r.ok:
                 entry.status = "published"
                 entry.post_id = r.media_id

@@ -135,7 +135,8 @@ def test_publish_due_completes_without_value_error(tmp_path):
         patch("social_poster.scheduler.SocialPoster") as MockPoster,
     ):
         mock_poster_instance = MockPoster.return_value
-        mock_poster_instance.post.return_value = [mock_result]
+        # the real facade returns {platform: PostResult}
+        mock_poster_instance.post.side_effect = lambda content, *, to, **kw: {to[0]: mock_result}
 
         # This WILL raise ValueError("CampaignBuilder: name is required")
         # because publish_due() never calls .named() on the builder.

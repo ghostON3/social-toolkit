@@ -25,7 +25,8 @@ dependencies = [
 
 [project.optional-dependencies]
 server = ["fastapi", "uvicorn[standard]"]
-dev = ["pytest", "httpx"]
+mcp = ["mcp>=2"]
+dev = ["pytest", "httpx", "mcp>=2"]
 
 [project.scripts]
 sp-login = "social_poster.cli:login_cli"
@@ -34,6 +35,7 @@ sp-delete = "social_poster.cli:delete_cli"
 sp-serve = "social_poster._serve_entry:main"
 sp-dm = "social_poster.ig_dm_cli:main"
 sp-publish = "social_poster.scheduler:publish_cli"
+sp-mcp = "social_poster.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["social_poster*"]
