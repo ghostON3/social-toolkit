@@ -1,8 +1,4 @@
-"""Offline tests for the understand pipeline, thread-id resolution and view.
-
-No network, no real ollama / faster-whisper / ffmpeg — the pipeline stages are
-monkeypatched, and thread resolution is driven with fake instagrapi clients.
-"""
+"""Synthetic media, resumable records, thread resolution and offline view checks."""
 from __future__ import annotations
 
 import json
@@ -43,12 +39,16 @@ class FakeIg:
         return "999"
 
 
-def _patch_pipeline(monkeypatch, transcript="", vision="VISION"):
+def _speech(monkeypatch, transcript):
     monkeypatch.setattr(U, "extract_audio", lambda mp4, md: "x.wav")
-    monkeypatch.setattr(U, "load_whisper", lambda size="base": object())
-    monkeypatch.setattr(U, "transcribe", lambda wav, model: transcript)
+    monkeypatch.setattr(U, "extract_frames", lambda *args: pytest.fail("unexpected frame extraction"))
+    return {"transcriber": lambda wav: transcript}
+
+
+def _vision(monkeypatch, caption):
     monkeypatch.setattr(U, "extract_frames", lambda mp4, md: ["f.jpg"])
-    monkeypatch.setattr(U, "ollama_vision", lambda frames, cap, **k: vision)
+    monkeypatch.setattr(U, "extract_audio", lambda *args: pytest.fail("unexpected audio extraction"))
+    return {"describe_frames": lambda frames, hint: caption}
 
 
 # ---- is_real_speech (the speech gate) ---------------------------------------
@@ -68,28 +68,27 @@ def test_is_real_speech_accepts_real_sentence():
 # ---- understand_reel: speech path vs vision path ----------------------------
 
 def test_reel_real_speech_skips_vision(monkeypatch, tmp_path):
-    _patch_pipeline(monkeypatch, transcript="This is a real spoken sentence about agents.",
-                    vision="SHOULD_NOT_APPEAR")
-    rec = understand_reel(_msg("1"), ig=FakeIg(), media_dir=str(tmp_path))
+    cfg = _speech(monkeypatch, "This is a real spoken sentence about agents.")
+    rec = understand_reel(_msg("1"), ig=FakeIg(), media_dir=tmp_path, **cfg)
     assert isinstance(rec, ReelUnderstanding)
     assert rec.transcript.startswith("This is a real")
     assert rec.vision == ""  # vision not consulted when speech is real
     assert rec.error is None
 
 
-def test_reel_music_falls_through_to_vision(monkeypatch, tmp_path):
-    _patch_pipeline(monkeypatch, transcript="Music", vision="ON-SCREEN TEXT: RAG patterns")
-    rec = understand_reel(_msg("2"), ig=FakeIg(), media_dir=str(tmp_path))
+def test_reel_music_does_not_escalate_to_vision(monkeypatch, tmp_path):
+    cfg = _speech(monkeypatch, "Music")
+    rec = understand_reel(_msg("2"), ig=FakeIg(), media_dir=tmp_path, **cfg)
     assert rec.transcript == "Music"
-    assert rec.vision == "ON-SCREEN TEXT: RAG patterns"
+    assert rec.vision == ""
     assert rec.error is None
 
 
 def test_reel_accepts_bare_url_source(monkeypatch, tmp_path):
-    _patch_pipeline(monkeypatch, transcript="Music", vision="V")
+    cfg = _vision(monkeypatch, "V")
     ig = FakeIg()
     url = "https://www.instagram.com/reel/DYZ5Ra2Rwpt/"
-    rec = understand_reel(url, ig=ig, media_dir=str(tmp_path))
+    rec = understand_reel(url, ig=ig, media_dir=str(tmp_path), **cfg)
     # the bare URL was wrapped and handed to download_media unchanged
     assert ig.downloaded[0].media_url == url
     assert rec.url == url
@@ -97,20 +96,20 @@ def test_reel_accepts_bare_url_source(monkeypatch, tmp_path):
 
 
 def test_reel_download_failure_is_recorded_not_raised(monkeypatch, tmp_path):
-    _patch_pipeline(monkeypatch)
+    cfg = _vision(monkeypatch, "V")
 
     class FailIg(FakeIg):
         def download_media(self, msg, media_dir):
             return None
 
-    rec = understand_reel(_msg("3"), ig=FailIg(), media_dir=str(tmp_path))
+    rec = understand_reel(_msg("3"), ig=FailIg(), media_dir=str(tmp_path), **cfg)
     assert rec.error is not None
     assert "no media" in rec.error
 
 
 def test_reel_record_parity_keys(monkeypatch, tmp_path):
-    _patch_pipeline(monkeypatch, transcript="Music", vision="V")
-    rec = understand_reel(_msg("4"), ig=FakeIg(), media_dir=str(tmp_path))
+    cfg = _vision(monkeypatch, "V")
+    rec = understand_reel(_msg("4"), ig=FakeIg(), media_dir=str(tmp_path), **cfg)
     assert set(rec.as_dict()) == {
         "id", "date", "author", "url", "transcript", "vision", "error",
     }
@@ -119,26 +118,26 @@ def test_reel_record_parity_keys(monkeypatch, tmp_path):
 # ---- understand_thread: resumable + retry -----------------------------------
 
 def test_thread_only_reels_and_resumable(monkeypatch, tmp_path):
-    _patch_pipeline(monkeypatch, transcript="Music", vision="V")
+    cfg = _vision(monkeypatch, "V")
     msgs = [_msg("a"), _msg("b", kind="text", url=None), _msg("c", kind="reel_share")]
     ig = FakeIg(msgs)
     out = tmp_path / "u.jsonl"
 
     recs = list(understand_thread(
         "https://www.instagram.com/direct/t/999/", ig=ig,
-        out_path=str(out), media_dir=str(tmp_path),
+        out_path=str(out), media_dir=str(tmp_path), **cfg,
     ))
     assert [r.id for r in recs] == ["a", "c"]  # 'b' is not a reel
 
     # second run: both already done → nothing re-processed
     recs2 = list(understand_thread(
-        "999", ig=ig, out_path=str(out), media_dir=str(tmp_path),
+        "999", ig=ig, out_path=str(out), media_dir=str(tmp_path), **cfg,
     ))
     assert recs2 == []
 
 
 def test_thread_retry_errors_reruns_error_ids(monkeypatch, tmp_path):
-    _patch_pipeline(monkeypatch, transcript="Music", vision="RECOVERED")
+    cfg = _vision(monkeypatch, "RECOVERED")
     out = tmp_path / "u.jsonl"
     out.write_text(
         json.dumps({"id": "a", "date": None, "author": None, "url": None,
@@ -149,14 +148,42 @@ def test_thread_retry_errors_reruns_error_ids(monkeypatch, tmp_path):
 
     # default: an error id is treated as done → skipped
     assert list(understand_thread("999", ig=ig, out_path=str(out),
-                                  media_dir=str(tmp_path))) == []
+                                  media_dir=str(tmp_path), **cfg)) == []
 
     # retry_errors: the error id is re-run and now succeeds
     recs = list(understand_thread("999", ig=ig, out_path=str(out),
-                                  media_dir=str(tmp_path), retry_errors=True))
+                                  media_dir=str(tmp_path), retry_errors=True, **cfg))
     assert [r.id for r in recs] == ["a"]
     assert recs[0].vision == "RECOVERED"
     assert recs[0].error is None
+
+
+@pytest.mark.parametrize("cfg,error", [
+    ({}, "analysis_capability_unavailable"),
+    ({"transcriber": "endpoint"}, "analysis_capability_invalid"),
+    ({"transcriber": str, "describe_frames": str}, "analysis_capability_ambiguous"),
+])
+def test_no_input_access_without_one_valid_capability(cfg, error, tmp_path, monkeypatch, capsys):
+    from instagram_dm_kit import cli
+
+    class Unreadable:
+        def __getattr__(self, name):
+            pytest.fail(f"private input access: {name}")
+
+    media = tmp_path / "media"
+    out = tmp_path / "history.jsonl"
+    out.write_bytes(b"untouched")
+    rec = understand_reel(Unreadable(), ig=Unreadable(), media_dir=media, **cfg)
+    assert rec == ReelUnderstanding("", None, None, None, "", "", error)
+    with pytest.raises(U.MediaCapabilityError, match=error):
+        list(understand_thread("fixture", ig=Unreadable(), media_dir=media, out_path=out, **cfg))
+    monkeypatch.setattr(cli, "_ig", lambda: pytest.fail("IG session requested"))
+    for selector in ("--url", "--thread"):
+        assert cli.main(["understand", selector, "fixture", "--media-dir", str(media),
+                         "--out", str(out)], **cfg) == 2
+        assert json.loads(capsys.readouterr().out) == {"error": error}
+    assert not media.exists()
+    assert out.read_bytes() == b"untouched"
 
 
 # ---- parse_thread_key (pure) ------------------------------------------------

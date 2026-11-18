@@ -5,13 +5,13 @@ shape:
 
 - **messaging** (needs a live session): :class:`IgDirect` — connect/login, read a
   thread, send/react/reply, ``watch`` a thread live, download shared media.
-- **understanding** (local models): :func:`understand_reel` / :func:`understand_thread`
-  — download → whisper speech-gate → qwen3-vl vision → structured record.
+- **understanding** (application-selected capability): :func:`understand_reel` / :func:`understand_thread`
+  — transcription or frame description → structured record.
 
 The pure stages — :func:`normalize_message`, :func:`to_records`,
 :func:`to_corpus_lines`, :func:`is_substantive`, the ``view`` helpers — import
 with **zero** instagrapi/session. Heavy deps are optional extras
-(``[live]`` = instagrapi, ``[understand]`` = faster-whisper, ``[browser]`` =
+(``[live]`` = instagrapi, ``[browser]`` =
 browser-cookie3); nothing here is imported eagerly, so ``import instagram_dm_kit``
 works with none of them installed.
 

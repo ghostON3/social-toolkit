@@ -15,7 +15,7 @@
     idk harvest --thread <id> [--amount N] [--out records.jsonl]   # full log
     idk corpus  --thread <id> [--amount N] [--out corpus.jsonl]    # knowledge corpus
     idk view    --records records.jsonl --out ./view              # browsable md + links
-    idk understand --thread <id> [--limit N] [--retry-errors]     # local-model reel understanding
+    idk understand --thread <id> [--limit N] [--retry-errors]     # requires a selected analysis capability
     idk understand --url <reel-url>                               # understand one reel
 
 A ``--thread`` accepts a raw thread id OR a pasted ``/direct/t/<key>`` web URL
@@ -63,7 +63,7 @@ def _write_lines(lines: list[str], out: Optional[str]) -> None:
         sys.stdout.write(payload)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None, *, transcriber=None, describe_frames=None) -> int:
     ap = argparse.ArgumentParser(prog="idk", description="instagram-dm-kit")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -152,7 +152,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     p = sub.add_parser(
         "understand",
-        help="local-model reel understanding (download→whisper→qwen3-vl→JSONL)",
+        help="analyze reels with an application-selected capability",
     )
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--thread", help="thread id / web-URL / @handle to understand")
@@ -161,9 +161,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--out", default="understanding.jsonl",
                    help="JSONL sink (resumable; thread mode)")
     p.add_argument("--media-dir", default="media", help="where bytes/frames land")
-    p.add_argument("--vision-model", default="qwen3-vl:8b")
-    p.add_argument("--whisper-size", default="base")
-    p.add_argument("--ollama-url", default=None, help="override /api/chat endpoint")
     p.add_argument("--retry-errors", action="store_true",
                    help="re-run ids previously marked with an error")
 
@@ -283,19 +280,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.cmd == "understand":
-        from .understand import understand_reel, understand_thread
+        from .understand import MediaCapabilityError, require_capability, understand_reel, understand_thread
 
+        try:
+            require_capability(transcriber, describe_frames)
+        except MediaCapabilityError as exc:
+            _print({"error": str(exc)})
+            return 2
         ig = _ig()
-        cfg = {
-            "media_dir": args.media_dir,
-            "vision_model": args.vision_model,
-            "whisper_size": args.whisper_size,
-        }
-        if args.ollama_url:
-            cfg["ollama_url"] = args.ollama_url
+        cfg = dict(media_dir=args.media_dir, transcriber=transcriber, describe_frames=describe_frames)
         if args.url:
-            _print(understand_reel(args.url, ig=ig, **cfg).as_dict())
-            return 0
+            record = understand_reel(args.url, ig=ig, **cfg)
+            _print(record.as_dict())
+            return 1 if record.error else 0
         n = 0
         for rec in understand_thread(
             args.thread, ig=ig, out_path=args.out, limit=args.limit,

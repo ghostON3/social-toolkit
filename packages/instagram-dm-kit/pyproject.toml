@@ -23,9 +23,8 @@ dependencies = []
 # instagrapi is only needed for the LIVE messaging half (IgDirect lazy-imports it);
 # the pure stages (normalize/harvest/corpus/view) import with none of these.
 live = ["instagrapi>=2.0.0"]
-understand = ["faster-whisper>=1.2"]  # `idk understand` — also needs `ffmpeg` on PATH (system dep)
 browser = ["browser-cookie3>=0.19"]   # `idk connect` — reuse a browser login
-dev = ["pytest>=7", "instagrapi>=2.0.0", "faster-whisper>=1.2", "browser-cookie3>=0.19"]
+dev = ["pytest>=7", "instagrapi>=2.0.0", "browser-cookie3>=0.19"]
 
 [project.urls]
 Homepage = "https://github.com/ghostON3/instagram-dm-kit"

@@ -1,51 +1,56 @@
-"""Offline tests for the IG media (voice/photo) processing helpers — the pure
-request-shaping and response-parsing parts. The whisper/tesseract/ollama IO is
-exercised by hand / live."""
+"""Offline contract for media processing."""
 
-from social_poster.ig_media import (
-    build_ollama_vision_payload,
-    compose_photo_order,
-    compose_voice_order,
-    ffmpeg_wav_args,
-    parse_whisper_response,
-)
+from pathlib import Path
+
+import pytest
+
+from social_poster import ig_media
 
 
-def test_parse_whisper_json_and_plain():
-    assert parse_whisper_response('{"text": "  ahoj svet  "}') == "ahoj svet"
-    assert parse_whisper_response("plain text body") == "plain text body"
-    assert parse_whisper_response("") == ""
-    assert parse_whisper_response('{"nope": 1}') == ""
+def test_saved_transcript_and_offline_conversion_args():
+    assert ig_media.parse_transcript_response('{"text": "  ahoj svet  "}') == "ahoj svet"
+    assert ig_media.parse_transcript_response("plain text body") == "plain text body"
+    assert ig_media.parse_transcript_response("") == ""
+    assert ig_media.parse_transcript_response('{"nope": 1}') == ""
+    assert ig_media.ffmpeg_wav_args("src", "dst")[:8] == [
+        "ffmpeg", "-y", "-i", "src", "-ar", "16000", "-ac", "1",
+    ]
+    assert ig_media.compose_voice_order("  hello  ") == "hello"
+    assert ig_media.compose_photo_order("error 42", "screenshot") == "[IG foto]\nscreenshot\nOCR:\nerror 42"
 
 
-def test_ffmpeg_args_target_16k_mono_wav():
-    args = ffmpeg_wav_args("/in/voice.m4a", "/out/voice.wav")
-    assert args[0] == "ffmpeg"
-    assert "/in/voice.m4a" in args
-    assert "/out/voice.wav" in args
-    assert "16000" in args and "1" in args  # 16 kHz, mono
+def test_missing_capabilities_decline_before_read(tmp_path, monkeypatch):
+    path = tmp_path / "missing"
+    monkeypatch.setattr(ig_media, "ocr_available", lambda: False)
+    monkeypatch.setattr(ig_media, "ocr_image", lambda path: pytest.fail("unexpected OCR"))
+    with pytest.raises(ig_media.MediaUnavailable, match="ocr_unavailable"):
+        ig_media.process_photo(path)
+    with pytest.raises(ig_media.MediaUnavailable, match="transcription_unavailable"):
+        ig_media.transcribe(path)
+    with pytest.raises(ig_media.MediaUnavailable, match="caption_unavailable"):
+        ig_media.process_photo(path, vision=True)
+    assert ig_media.transcribe(path, transcriber=lambda p: p.name) == "missing"
 
 
-def test_ollama_vision_payload_shape():
-    p = build_ollama_vision_payload("BASE64DATA", model="qwen3-vl:8b", prompt="describe")
-    assert p["model"] == "qwen3-vl:8b"
-    assert p["stream"] is False
-    assert p["images"] == ["BASE64DATA"]
-    assert p["prompt"] == "describe"
+@pytest.mark.parametrize("ocr", ["", "a", "offline text"])
+def test_ocr_does_not_promote_input_to_captioning(monkeypatch, ocr):
+    monkeypatch.setattr(ig_media, "ocr_available", lambda: True)
+    monkeypatch.setattr(ig_media, "ocr_image", lambda path: ocr)
+    for mode in (None, False):
+        parts = ig_media.process_photo(Path("photo"), vision=mode,
+                                       captioner=lambda path: pytest.fail("unexpected caption"))
+        assert parts == {"ocr": ocr, "caption": "", "raw_input": ig_media.compose_photo_order(ocr)}
+    assert ig_media.compose_photo_order("") == ""
 
 
-def test_compose_voice_order_trims():
-    assert compose_voice_order("  uprav booking page  ") == "uprav booking page"
 
+def test_ocr_availability_requires_a_usable_language_without_opening_media(monkeypatch):
+    from subprocess import CompletedProcess
 
-def test_compose_photo_order_variants():
-    both = compose_photo_order("n+ ERROR line 42", "screenshot of a stack trace")
-    assert both.startswith("[IG foto]")
-    assert "screenshot of a stack trace" in both
-    assert "OCR:" in both and "ERROR line 42" in both
-
-    ocr_only = compose_photo_order("just ocr text", "")
-    assert "OCR:" in ocr_only and "just ocr text" in ocr_only
-
-    empty = compose_photo_order("", "")
-    assert "žiadny text" in empty
+    monkeypatch.setattr(ig_media.shutil, "which", lambda _: "/fixture/tesseract")
+    def list_langs(args, **kwargs):
+        assert args == ["tesseract", "--list-langs"]
+        return CompletedProcess(args, 0, stdout="List of available languages (1):\neng\n")
+    monkeypatch.setattr(ig_media.subprocess, "run", list_langs)
+    assert ig_media.ocr_available("slk+eng")
+    assert not ig_media.ocr_available("ces")
